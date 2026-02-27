@@ -762,6 +762,7 @@ class TestMain:
             "tier",
             "filename",
             "timestamp_seconds",
+            "timestamp_minsec",
             "issue_type",
             "severity_score",
         ]
@@ -793,6 +794,7 @@ class TestMain:
             "tier",
             "filename",
             "timestamp_seconds",
+            "timestamp_minsec",
             "issue_type",
             "severity_score",
         ]
@@ -886,6 +888,7 @@ class TestMain:
             "tier",
             "filename",
             "timestamp_seconds",
+            "timestamp_minsec",
             "issue_type",
             "severity_score",
         ]

@@ -434,6 +434,7 @@ def main() -> None:
         "tier",
         "filename",
         "timestamp_seconds",
+        "timestamp_minsec",
         "issue_type",
         "severity_score",
     ]
@@ -463,12 +464,16 @@ def main() -> None:
     rows = []
     for rank, ev in enumerate(all_events, start=1):
         tier = "primary" if rank <= MAX_PRIMARY else "secondary"
+        ts = round(ev["timestamp"], 3)
+        mins, secs = divmod(ts, 60)
+        minsec = f"{int(mins)}:{secs:06.3f}"
         rows.append(
             {
                 "rank_global": rank,
                 "tier": tier,
                 "filename": ev["filename"],
-                "timestamp_seconds": round(ev["timestamp"], 3),
+                "timestamp_seconds": ts,
+                "timestamp_minsec": minsec,
                 "issue_type": ev["issue_type"],
                 "severity_score": round(ev["severity"], 4),
             }
