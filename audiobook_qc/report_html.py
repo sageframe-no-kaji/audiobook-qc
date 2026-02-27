@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import os
+import urllib.parse
 
 from audiobook_qc.detectors import Event
 
@@ -41,6 +42,7 @@ def _build_rows(events: list[Event]) -> str:
         rank = int(ev["rank_global"])  # type: ignore[typeddict-item]
         tier = str(ev["tier"])  # type: ignore[typeddict-item]
         filename = html.escape(str(ev["filename"]))
+        file_src = urllib.parse.quote(str(ev["filename"]))
         ts = round(float(ev["timestamp"]), 3)
         mins, secs = divmod(ts, 60)
         minsec = html.escape(f"{int(mins)}:{secs:06.3f}")
@@ -60,7 +62,7 @@ def _build_rows(events: list[Event]) -> str:
             f'      <td class="player-cell">\n'
             f'        <audio controls preload="metadata"'
             f' ontimeupdate="updateTime(this)">\n'
-            f'          <source src="{filename}" type="audio/wav">\n'
+            f'          <source src="{file_src}" type="audio/wav">\n'
             f'        </audio>'
             f'<span class="cur-time">0:00</span>\n'
             f'        <div class="player-btns">\n'
@@ -188,19 +190,13 @@ _PAGE_TEMPLATE = """\
       var row = button.closest("tr");
       var audio = row.querySelector("audio");
       audio.currentTime = Math.max(0, timestamp - 5);
-      var p = audio.play();
-      if (p !== undefined) { p.catch(function() {}); }
+      audio.play();
     }
 
     function seekRel(button, delta) {
       var row = button.closest("tr");
       var audio = row.querySelector("audio");
-      var wasPlaying = !audio.paused;
       audio.currentTime = Math.max(0, audio.currentTime + delta);
-      if (wasPlaying) {
-        var p = audio.play();
-        if (p !== undefined) { p.catch(function() {}); }
-      }
     }
 
     function exportSelected() {
@@ -212,7 +208,7 @@ _PAGE_TEMPLATE = """\
         if (checkbox && checkbox.checked) {
           var cols = row.querySelectorAll("td");
           var note = (row.querySelector("textarea.comment") || {value: ""}).value;
-          note = note.replace(/\r?\n/g, " ").replace(/,/g, ";");
+          note = note.replace(/\\r?\\n/g, " ").replace(/,/g, ";");
           csv += [
             cols[0].innerText,
             cols[1].innerText,
