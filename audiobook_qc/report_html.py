@@ -188,14 +188,19 @@ _PAGE_TEMPLATE = """\
       var row = button.closest("tr");
       var audio = row.querySelector("audio");
       audio.currentTime = Math.max(0, timestamp - 5);
-      audio.play();
+      var p = audio.play();
+      if (p !== undefined) { p.catch(function() {}); }
     }
 
     function seekRel(button, delta) {
       var row = button.closest("tr");
       var audio = row.querySelector("audio");
+      var wasPlaying = !audio.paused;
       audio.currentTime = Math.max(0, audio.currentTime + delta);
-      audio.play();
+      if (wasPlaying) {
+        var p = audio.play();
+        if (p !== undefined) { p.catch(function() {}); }
+      }
     }
 
     function exportSelected() {
