@@ -201,7 +201,8 @@ _PAGE_TEMPLATE = """\
 
     function exportSelected() {
       var rows = document.querySelectorAll("tbody tr");
-      var csv = "rank_global,tier,filename,timestamp_seconds,timestamp_minsec,issue_type,severity_score,notes\\n";
+      var csv = "rank_global,tier,filename,timestamp_seconds,timestamp_minsec,"
+        + "issue_type,severity_score,notes\n";
 
       rows.forEach(function(row) {
         var checkbox = row.querySelector("input[type='checkbox']");

@@ -15,20 +15,13 @@ import scipy.signal
 import librosa
 
 from audiobook_qc.config import (
-    CLICK_BAND,
-    CLICK_MAX_DURATION_MS,
-    CLICK_MERGE_MS,
-    CLICK_THRESHOLD_MULTIPLIER,
     CLIPPING_THRESHOLD,
+    Config,
     FRAME_SIZE,
     HOP_LENGTH,
     NOISE_DB_DELTA_THRESHOLD,
     NOISE_MIN_SEPARATION_SECONDS,
     NOISE_WINDOW_SECONDS,
-    PLOSIVE_BAND,
-    PLOSIVE_MAX_DURATION_MS,
-    PLOSIVE_MERGE_MS,
-    PLOSIVE_THRESHOLD_MULTIPLIER,
     ROLLING_MEDIAN_SECONDS,
 )
 
@@ -151,14 +144,19 @@ def merge_events_by_gap(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def detect_clipping(audio: np.ndarray, sr: int, filename: str) -> list[Event]:
+def detect_clipping(
+    audio: np.ndarray,
+    sr: int,
+    filename: str,
+    clipping_threshold: float = CLIPPING_THRESHOLD,
+) -> list[Event]:
     """
-    Detect continuous clipped regions (|sample| >= CLIPPING_THRESHOLD).
+    Detect continuous clipped regions (|sample| >= clipping_threshold).
     One event per contiguous region.
     Severity = number of clipped samples in the region.
     Timestamp = first clipped sample in seconds.
     """
-    clipped = np.abs(audio) >= CLIPPING_THRESHOLD
+    clipped = np.abs(audio) >= clipping_threshold
     starts, ends = find_runs(clipped)
     events: list[Event] = []
     for s, e in zip(starts, ends):
@@ -187,6 +185,9 @@ def detect_transients(
     max_duration_ms: float,
     merge_ms: float,
     issue_type: str,
+    frame_size: int = FRAME_SIZE,
+    hop_length: int = HOP_LENGTH,
+    rolling_median_seconds: float = ROLLING_MEDIAN_SECONDS,
 ) -> list[Event]:
     """
     Generic short-transient detector used for both clicks and plosives.
@@ -201,16 +202,16 @@ def detect_transients(
 
     Severity = peak (frame_rms / baseline_rms) across the event window.
     """
-    if len(audio) < FRAME_SIZE:
+    if len(audio) < frame_size:
         return []
 
     filtered = bandpass_filter(audio, float(band[0]), float(band[1]), sr)
 
-    rms = compute_frame_rms(filtered, FRAME_SIZE, HOP_LENGTH)
+    rms = compute_frame_rms(filtered, frame_size, hop_length)
     if rms.size == 0:
         return []
 
-    median_win = max(int(ROLLING_MEDIAN_SECONDS * sr / HOP_LENGTH), 3)
+    median_win = max(int(rolling_median_seconds * sr / hop_length), 3)
     med_rms = rolling_median(rms, median_win)
 
     # Avoid division by near-zero baseline (silent or DC-only content)
@@ -223,10 +224,10 @@ def detect_transients(
         return []
 
     # Duration in frames corresponding to the maximum allowed ms
-    frame_dur_ms = HOP_LENGTH / sr * 1000.0
+    frame_dur_ms = hop_length / sr * 1000.0
     max_frames = max_duration_ms / frame_dur_ms
 
-    hop_over_sr = HOP_LENGTH / sr
+    hop_over_sr = hop_length / sr
     candidates: list[_WorkEvent] = []
     for s, e in zip(starts, ends):
         span = int(e - s + 1)
@@ -272,20 +273,27 @@ def detect_transients(
     return result
 
 
-def detect_noise_floor_jumps(audio: np.ndarray, sr: int, filename: str) -> list[Event]:
+def detect_noise_floor_jumps(
+    audio: np.ndarray,
+    sr: int,
+    filename: str,
+    noise_window_seconds: float = NOISE_WINDOW_SECONDS,
+    noise_db_threshold: float = NOISE_DB_DELTA_THRESHOLD,
+    noise_min_separation: float = NOISE_MIN_SEPARATION_SECONDS,
+) -> list[Event]:
     """
     Detect sudden jumps in the noise floor between adjacent RMS windows.
 
     Pipeline:
-      1. Tile audio into non-overlapping windows of NOISE_WINDOW_SECONDS.
+      1. Tile audio into non-overlapping windows of noise_window_seconds.
       2. Compute RMS per window, convert to dBFS.
-      3. Flag transitions where |ΔdB| >= NOISE_DB_DELTA_THRESHOLD.
-      4. Enforce NOISE_MIN_SEPARATION_SECONDS between kept events.
+      3. Flag transitions where |ΔdB| >= noise_db_threshold.
+      4. Enforce noise_min_separation seconds between kept events.
 
     Severity = |ΔdB| at the transition.
     Timestamp = start of the earlier of the two windows.
     """
-    window_samples = max(int(NOISE_WINDOW_SECONDS * sr), 1)
+    window_samples = max(int(noise_window_seconds * sr), 1)
     n_windows = len(audio) // window_samples
     if n_windows < 2:
         return []
@@ -295,7 +303,7 @@ def detect_noise_floor_jumps(audio: np.ndarray, sr: int, filename: str) -> list[
     db_vals = 20.0 * np.log10(rms_vals + 1e-12)
     delta = np.diff(db_vals)  # shape (n_windows - 1,)
 
-    flagged_idx = np.where(np.abs(delta) >= NOISE_DB_DELTA_THRESHOLD)[0]
+    flagged_idx = np.where(np.abs(delta) >= noise_db_threshold)[0]
     if flagged_idx.size == 0:
         return []
 
@@ -307,7 +315,7 @@ def detect_noise_floor_jumps(audio: np.ndarray, sr: int, filename: str) -> list[
                 Event,
                 {
                     "filename": filename,
-                    "timestamp": float(idx) * NOISE_WINDOW_SECONDS,
+                    "timestamp": float(idx) * noise_window_seconds,
                     "issue_type": "noise_floor_jump",
                     "severity": float(np.abs(delta[idx])),
                 },
@@ -317,7 +325,7 @@ def detect_noise_floor_jumps(audio: np.ndarray, sr: int, filename: str) -> list[
     # Enforce minimum separation — greedy chronological pass
     events: list[Event] = [candidates[0]]
     for cand in candidates[1:]:
-        if cand["timestamp"] - events[-1]["timestamp"] >= NOISE_MIN_SEPARATION_SECONDS:
+        if cand["timestamp"] - events[-1]["timestamp"] >= noise_min_separation:
             events.append(cand)
 
     return events
@@ -333,6 +341,7 @@ def run_all_detectors(
     sr: int,
     filename: str,
     skip: set[str] | None = None,
+    cfg: Config | None = None,
 ) -> list[Event]:
     """Run every detector and return the combined flat event list.
 
@@ -340,22 +349,28 @@ def run_all_detectors(
     ----------
     skip : set[str] | None
         Detector names to exclude (e.g. {"noise_floor_jump"}).
+    cfg : Config | None
+        Runtime parameter overrides.  ``None`` uses compiled-in defaults.
     """
     _skip = skip or set()
+    c = cfg or Config()
     events: list[Event] = []
     if "clipping" not in _skip:
-        events.extend(detect_clipping(audio, sr, filename))
+        events.extend(detect_clipping(audio, sr, filename, c.clipping_threshold))
     if "click" not in _skip:
         events.extend(
             detect_transients(
                 audio,
                 sr,
                 filename,
-                band=CLICK_BAND,
-                threshold_mult=CLICK_THRESHOLD_MULTIPLIER,
-                max_duration_ms=CLICK_MAX_DURATION_MS,
-                merge_ms=CLICK_MERGE_MS,
+                band=(c.click_band_low, c.click_band_high),
+                threshold_mult=c.click_threshold,
+                max_duration_ms=c.click_max_duration_ms,
+                merge_ms=c.click_merge_ms,
                 issue_type="click",
+                frame_size=c.frame_size,
+                hop_length=c.hop_length,
+                rolling_median_seconds=c.rolling_median_seconds,
             )
         )
     if "plosive" not in _skip:
@@ -364,13 +379,25 @@ def run_all_detectors(
                 audio,
                 sr,
                 filename,
-                band=PLOSIVE_BAND,
-                threshold_mult=PLOSIVE_THRESHOLD_MULTIPLIER,
-                max_duration_ms=PLOSIVE_MAX_DURATION_MS,
-                merge_ms=PLOSIVE_MERGE_MS,
+                band=(c.plosive_band_low, c.plosive_band_high),
+                threshold_mult=c.plosive_threshold,
+                max_duration_ms=c.plosive_max_duration_ms,
+                merge_ms=c.plosive_merge_ms,
                 issue_type="plosive",
+                frame_size=c.frame_size,
+                hop_length=c.hop_length,
+                rolling_median_seconds=c.rolling_median_seconds,
             )
         )
     if "noise_floor_jump" not in _skip:
-        events.extend(detect_noise_floor_jumps(audio, sr, filename))
+        events.extend(
+            detect_noise_floor_jumps(
+                audio,
+                sr,
+                filename,
+                noise_window_seconds=c.noise_window_seconds,
+                noise_db_threshold=c.noise_db_threshold,
+                noise_min_separation=c.noise_min_separation,
+            )
+        )
     return events

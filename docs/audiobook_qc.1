@@ -1,0 +1,371 @@
+.\" audiobook_qc.1 — manual page for the audiobook_qc scanner
+.\" Generated for audiobook_qc v1.0
+.\"
+.TH AUDIOBOOK_QC 1 "2025" "audiobook_qc" "Audiobook Quality Control"
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH NAME
+.\"
+audiobook_qc \- detect and rank audio quality issues in a folder of WAV files
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH SYNOPSIS
+.\"
+.B python\ main.py
+.I FOLDER
+.RB [ \-\-skip
+.IR DETECTOR \&...]
+.RB [ \-\-max\-primary
+.IR N ]
+.RB [ \-\-max\-secondary
+.IR N ]
+.RB [ \-\-clipping\-threshold
+.IR F ]
+.RB [ \-\-click\-band\-low
+.IR HZ ]
+.RB [ \-\-click\-band\-high
+.IR HZ ]
+.RB [ \-\-click\-threshold
+.IR F ]
+.RB [ \-\-click\-max\-duration\-ms
+.IR MS ]
+.RB [ \-\-click\-merge\-ms
+.IR MS ]
+.RB [ \-\-plosive\-band\-low
+.IR HZ ]
+.RB [ \-\-plosive\-band\-high
+.IR HZ ]
+.RB [ \-\-plosive\-threshold
+.IR F ]
+.RB [ \-\-plosive\-max\-duration\-ms
+.IR MS ]
+.RB [ \-\-plosive\-merge\-ms
+.IR MS ]
+.RB [ \-\-noise\-window\-seconds
+.IR S ]
+.RB [ \-\-noise\-db\-threshold
+.IR DB ]
+.RB [ \-\-noise\-min\-separation
+.IR S ]
+.RB [ \-\-frame\-size
+.IR N ]
+.RB [ \-\-hop\-length
+.IR N ]
+.RB [ \-\-rolling\-median\-seconds
+.IR S ]
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH DESCRIPTION
+.\"
+.B audiobook_qc
+walks a directory of
+.B .wav
+files, runs four broadband signal-processing detectors against each file,
+globally ranks every detected event by severity, then writes two output
+artefacts into the scanned folder:
+.TP
+.B qc_report.csv
+Machine-readable CSV with all ranked events: global rank, severity tier,
+filename, timestamp in seconds, timestamp in MM:SS format, issue type, and
+severity score.
+.TP
+.B review.html
+Browser-based interactive review interface.  Each event has an inline audio
+player, playback controls, per-event notes field, checkbox selection, and an
+"Export Selected" button that downloads a filtered CSV.
+.PP
+The four detectors are:
+.TP
+.B clipping
+Finds runs of consecutive samples at or above the hard-clip ceiling
+(default 0.998).  Very short runs (< 3 samples) are ignored.  Severity is
+proportional to run length.
+.TP
+.B click
+Bandpass-filters to the 2 500 – 10 000 Hz range, computes short-time RMS
+with a rolling-median baseline, and flags frames where the RMS exceeds
+5 × the local median.  Events shorter than 15 ms are retained; longer bursts
+are discarded as non-click transients.  Nearby events within 150 ms are merged.
+.TP
+.B plosive
+Same pipeline as the click detector, operating in the 20 – 180 Hz band with a
+4× threshold and an 80 ms maximum duration.  Captures low-frequency mouth pops
+and microphone thumps.
+.TP
+.B noise_floor_jump
+Computes 1-second RMS windows across the file (in dB) and flags pairs of
+adjacent windows that differ by more than 14 dB.  Enforces a minimum
+10-second gap between reported events to avoid multiple flags for the same
+environmental change.
+.PP
+After per-file detection the full event list is globally ranked by severity
+score.  Events are split into a
+.B primary
+tier (highest severity, capped at 75 by default) and a
+.B secondary
+tier (next highest, capped at 200 by default).  Only ranked events appear in
+the output files.
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH OPTIONS
+.\"
+.SS Positional
+.TP
+.I FOLDER
+Path to the directory containing
+.B .wav
+files.  The directory is searched non-recursively.
+.\"
+.SS Detectors
+.TP
+\fB\-\-skip\fR \fIDETECTOR\fR [\fIDETECTOR\fR ...]
+Disable one or more detectors.  Allowed values:
+.BR clipping ,
+.BR click ,
+.BR plosive ,
+.BR noise_floor_jump .
+Repeat the flag or space-separate multiple names.
+.\"
+.SS Report caps
+.TP
+\fB\-\-max\-primary\fR \fIN\fR
+Maximum number of primary-tier events written to the output files.
+.RI "Default: " 75 .
+.TP
+\fB\-\-max\-secondary\fR \fIN\fR
+Maximum number of secondary-tier events written to the output files.
+.RI "Default: " 200 .
+.\"
+.SS Clipping detection
+.TP
+\fB\-\-clipping\-threshold\fR \fIF\fR
+Absolute sample-value ceiling (0.0 – 1.0) above which a sample is
+considered clipped.
+.RI "Default: " 0.998 .
+.\"
+.SS Click detection
+.TP
+\fB\-\-click\-band\-low\fR \fIHZ\fR
+Lower bound of the click bandpass filter in Hz.
+.RI "Default: " 2500 .
+.TP
+\fB\-\-click\-band\-high\fR \fIHZ\fR
+Upper bound of the click bandpass filter in Hz.
+.RI "Default: " 10000 .
+.TP
+\fB\-\-click\-threshold\fR \fIF\fR
+RMS-to-median-baseline ratio required to flag a frame as a click candidate.
+Higher values mean fewer, more severe events are flagged.
+.RI "Default: " 5.0 .
+.TP
+\fB\-\-click\-max\-duration\-ms\fR \fIMS\fR
+Flagged runs longer than this duration (in milliseconds) are discarded because
+they are too long to be clicks.
+.RI "Default: " 15 .
+.TP
+\fB\-\-click\-merge\-ms\fR \fIMS\fR
+Adjacent click events separated by less than this gap (in milliseconds) are
+merged into a single event.
+.RI "Default: " 150 .
+.\"
+.SS Plosive detection
+.TP
+\fB\-\-plosive\-band\-low\fR \fIHZ\fR
+Lower bound of the plosive bandpass filter in Hz.
+.RI "Default: " 20 .
+.TP
+\fB\-\-plosive\-band\-high\fR \fIHZ\fR
+Upper bound of the plosive bandpass filter in Hz.
+.RI "Default: " 180 .
+.TP
+\fB\-\-plosive\-threshold\fR \fIF\fR
+RMS-to-median-baseline ratio required to flag a frame as a plosive candidate.
+.RI "Default: " 4.0 .
+.TP
+\fB\-\-plosive\-max\-duration\-ms\fR \fIMS\fR
+Flagged runs longer than this duration (in milliseconds) are discarded.
+.RI "Default: " 80 .
+.TP
+\fB\-\-plosive\-merge\-ms\fR \fIMS\fR
+Adjacent plosive events separated by less than this gap (in milliseconds) are
+merged into a single event.
+.RI "Default: " 200 .
+.\"
+.SS Noise-floor jump detection
+.TP
+\fB\-\-noise\-window\-seconds\fR \fIS\fR
+Length of each RMS measurement window in seconds.
+.RI "Default: " 1.0 .
+.TP
+\fB\-\-noise\-db\-threshold\fR \fIDB\fR
+Minimum absolute dB difference between two adjacent windows that triggers a
+noise-floor jump event.
+.RI "Default: " 14.0 .
+.TP
+\fB\-\-noise\-min\-separation\fR \fIS\fR
+Minimum time in seconds enforced between consecutive noise-floor jump events
+in the same file.
+.RI "Default: " 10.0 .
+.\"
+.SS DSP / framing
+.TP
+\fB\-\-frame\-size\fR \fIN\fR
+FFT frame size in samples used by the click and plosive detectors.
+Must be a power of two for best FFT performance.
+.RI "Default: " 2048 .
+.TP
+\fB\-\-hop\-length\fR \fIN\fR
+Hop (stride) between successive frames in samples.
+Smaller values increase time resolution at the cost of speed.
+.RI "Default: " 512 .
+.TP
+\fB\-\-rolling\-median\-seconds\fR \fIS\fR
+Width of the rolling-median baseline estimator used by the click and plosive
+detectors.  Wider values produce a smoother baseline; narrower values track
+fast level changes more tightly.
+.RI "Default: " 1.0 .
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH EXAMPLES
+.\"
+Scan a folder with default settings:
+.PP
+.RS 4
+.B python main.py ./chapters
+.RE
+.PP
+Skip noise-floor detection:
+.PP
+.RS 4
+.B python main.py ./chapters --skip noise_floor_jump
+.RE
+.PP
+Skip multiple detectors:
+.PP
+.RS 4
+.B python main.py ./chapters --skip click plosive
+.RE
+.PP
+Increase report limits and raise the click sensitivity:
+.PP
+.RS 4
+.B python main.py ./chapters --max-primary 100 --max-secondary 300 --click-threshold 4.0
+.RE
+.PP
+Tighter clipping threshold, louder noise-floor events only:
+.PP
+.RS 4
+.B python main.py ./chapters --clipping-threshold 0.99 --noise-db-threshold 20.0
+.RE
+.PP
+Adjust DSP to match a 44.1 kHz file with finer time resolution:
+.PP
+.RS 4
+.B python main.py ./chapters --frame-size 1024 --hop-length 256
+.RE
+.PP
+Focus only on clipping (skip everything else):
+.PP
+.RS 4
+.B python main.py ./chapters --skip click plosive noise_floor_jump
+.RE
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH OUTPUT FILES
+.\"
+Both output files are written into
+.I FOLDER
+and will overwrite any existing file with the same name.
+.TP
+.B qc_report.csv
+Comma-separated values.  Columns:
+.BR rank_global ", " tier ", " filename ", " timestamp_seconds ,
+.BR timestamp_minsec ", " issue_type ", " severity_score .
+.TP
+.B review.html
+Self-contained interactive HTML page.  No server required; open with any
+modern browser.  Inline
+.B <audio>
+elements allow direct playback from the scanned folder.  Each row has
+a free-text notes textarea and a checkbox.  The
+.B Export Selected
+button downloads a CSV of checked rows with notes appended.
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH ISSUE TYPES
+.\"
+.TP
+.B clipping
+Hard-clipped sample run.
+.TP
+.B click
+Short high-frequency transient (electrical or mechanical interference).
+.TP
+.B plosive
+Low-frequency mouth pop or microphone thump.
+.TP
+.B noise_floor_jump
+Sudden environmental-noise-floor change between adjacent measurement windows.
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH ENVIRONMENT
+.\"
+.TP
+.B PYTHONPATH
+Must include the repository root when invoking via
+.BR "python main.py" ,
+or install the package with
+.BR "pip install -e ." .
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH DEPENDENCIES
+.\"
+Python 3.11 or later.
+.PP
+Required packages: numpy, scipy, librosa, soundfile.
+.PP
+Install with:
+.PP
+.RS 4
+.B pip install numpy scipy librosa soundfile
+.RE
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH FILES
+.\"
+.TP
+.B audiobook_qc/config.py
+All compiled-in default constants.  Edit this file to permanently change
+any default value.
+.TP
+.B audiobook_qc/detectors.py
+Signal-processing algorithms for all four issue types.
+.TP
+.B audiobook_qc/scanner.py
+Directory walker and per-file loader.
+.TP
+.B audiobook_qc/ranking.py
+Global severity ranker and tier assignment.
+.TP
+.B audiobook_qc/report_csv.py
+CSV report writer.
+.TP
+.B audiobook_qc/report_html.py
+Interactive HTML report writer.
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH SEE ALSO
+.\"
+.BR sox (1),
+.BR ffmpeg (1),
+.BR audacity (1)
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH BUGS
+.\"
+Report bugs via the project issue tracker on GitHub.
+.\"
+.\" ─────────────────────────────────────────────────────────────────────────
+.SH AUTHOR
+.\"
+audiobook_qc was written by the project contributors.

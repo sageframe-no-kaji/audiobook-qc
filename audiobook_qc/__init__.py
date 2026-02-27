@@ -6,6 +6,7 @@ from audiobook_qc.config import (
     CLICK_MERGE_MS,
     CLICK_THRESHOLD_MULTIPLIER,
     CLIPPING_THRESHOLD,
+    Config,
     FRAME_SIZE,
     HOP_LENGTH,
     MAX_PRIMARY,
@@ -40,6 +41,7 @@ from audiobook_qc.scanner import scan_directory, scan_file
 __all__ = [
     # config
     "CLICK_BAND",
+    "Config",
     "CLICK_MAX_DURATION_MS",
     "CLICK_MERGE_MS",
     "CLICK_THRESHOLD_MULTIPLIER",

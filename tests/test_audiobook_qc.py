@@ -24,6 +24,7 @@ import soundfile as sf
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import audiobook_qc.config as cfg  # noqa: E402
+from audiobook_qc.config import Config  # noqa: E402
 from audiobook_qc.detectors import (  # noqa: E402
     Event,
     _WorkEvent,
@@ -1165,3 +1166,632 @@ class TestMain:
             assert df["rank_global"].iloc[0] == 1
             scores = df["severity_score"].tolist()
             assert scores == sorted(scores, reverse=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFIG — Config dataclass
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestConfigDataclass:
+    def test_default_frame_size(self):
+        assert Config().frame_size == cfg.FRAME_SIZE
+
+    def test_default_hop_length(self):
+        assert Config().hop_length == cfg.HOP_LENGTH
+
+    def test_default_max_primary(self):
+        assert Config().max_primary == cfg.MAX_PRIMARY
+
+    def test_default_max_secondary(self):
+        assert Config().max_secondary == cfg.MAX_SECONDARY
+
+    def test_default_click_band_low(self):
+        assert Config().click_band_low == pytest.approx(float(cfg.CLICK_BAND[0]))
+
+    def test_default_click_band_high(self):
+        assert Config().click_band_high == pytest.approx(float(cfg.CLICK_BAND[1]))
+
+    def test_default_click_threshold(self):
+        assert Config().click_threshold == pytest.approx(cfg.CLICK_THRESHOLD_MULTIPLIER)
+
+    def test_default_click_max_duration_ms(self):
+        assert Config().click_max_duration_ms == pytest.approx(float(cfg.CLICK_MAX_DURATION_MS))
+
+    def test_default_click_merge_ms(self):
+        assert Config().click_merge_ms == pytest.approx(float(cfg.CLICK_MERGE_MS))
+
+    def test_default_plosive_band_low(self):
+        assert Config().plosive_band_low == pytest.approx(float(cfg.PLOSIVE_BAND[0]))
+
+    def test_default_plosive_band_high(self):
+        assert Config().plosive_band_high == pytest.approx(float(cfg.PLOSIVE_BAND[1]))
+
+    def test_default_plosive_threshold(self):
+        assert Config().plosive_threshold == pytest.approx(cfg.PLOSIVE_THRESHOLD_MULTIPLIER)
+
+    def test_default_plosive_max_duration_ms(self):
+        assert Config().plosive_max_duration_ms == pytest.approx(float(cfg.PLOSIVE_MAX_DURATION_MS))
+
+    def test_default_plosive_merge_ms(self):
+        assert Config().plosive_merge_ms == pytest.approx(float(cfg.PLOSIVE_MERGE_MS))
+
+    def test_default_noise_window_seconds(self):
+        assert Config().noise_window_seconds == pytest.approx(cfg.NOISE_WINDOW_SECONDS)
+
+    def test_default_noise_db_threshold(self):
+        assert Config().noise_db_threshold == pytest.approx(cfg.NOISE_DB_DELTA_THRESHOLD)
+
+    def test_default_noise_min_separation(self):
+        assert Config().noise_min_separation == pytest.approx(cfg.NOISE_MIN_SEPARATION_SECONDS)
+
+    def test_default_clipping_threshold(self):
+        assert Config().clipping_threshold == pytest.approx(cfg.CLIPPING_THRESHOLD)
+
+    def test_default_rolling_median_seconds(self):
+        assert Config().rolling_median_seconds == pytest.approx(cfg.ROLLING_MEDIAN_SECONDS)
+
+    def test_override_max_primary(self):
+        c = Config(max_primary=10)
+        assert c.max_primary == 10
+
+    def test_override_max_secondary(self):
+        c = Config(max_secondary=50)
+        assert c.max_secondary == 50
+
+    def test_override_clipping_threshold(self):
+        c = Config(clipping_threshold=0.9)
+        assert c.clipping_threshold == pytest.approx(0.9)
+
+    def test_override_click_threshold(self):
+        c = Config(click_threshold=8.0)
+        assert c.click_threshold == pytest.approx(8.0)
+
+    def test_override_frame_size(self):
+        c = Config(frame_size=1024)
+        assert c.frame_size == 1024
+
+    def test_config_is_dataclass(self):
+        import dataclasses
+        assert dataclasses.is_dataclass(Config)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DETECTORS — detect_clipping with custom threshold
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestDetectClippingCustomThreshold:
+    def test_custom_lower_threshold_detects_lower_amplitude(self):
+        audio = np.zeros(SR, dtype=np.float32)
+        audio[100:110] = 0.95
+        # default threshold 0.998 — should not detect
+        assert detect_clipping(audio, SR, "t.wav") == []
+        # custom threshold 0.9 — should detect
+        events = detect_clipping(audio, SR, "t.wav", clipping_threshold=0.9)
+        assert len(events) == 1
+
+    def test_custom_higher_threshold_misses_default_clips(self):
+        audio = np.zeros(SR, dtype=np.float32)
+        audio[100:110] = 0.999
+        # default detects (>=0.998)
+        assert len(detect_clipping(audio, SR, "t.wav")) == 1
+        # threshold 1.01 — nothing can hit that in float32 from [-1,1] normalized
+        assert detect_clipping(audio, SR, "t.wav", clipping_threshold=1.01) == []
+
+    def test_threshold_parameter_passed_through_run_all(self):
+        audio = np.zeros(SR, dtype=np.float32)
+        audio[100:110] = 0.95
+        c = Config(clipping_threshold=0.9)
+        events = run_all_detectors(audio, SR, "t.wav", cfg=c)
+        clipping_events = [e for e in events if e["issue_type"] == "clipping"]
+        assert len(clipping_events) >= 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DETECTORS — detect_transients with custom frame/hop/median params
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestDetectTransientsCustomParams:
+    def test_custom_frame_size_and_hop_length_accepted(self):
+        audio = _quiet_noise(3.0)
+        burst = _sine_burst(5000.0, 0.03, amp=0.5)
+        audio = _inject(audio, burst, 1.5)
+        events = detect_transients(
+            audio, SR, "t.wav",
+            band=cfg.CLICK_BAND,
+            threshold_mult=cfg.CLICK_THRESHOLD_MULTIPLIER,
+            max_duration_ms=500.0,
+            merge_ms=cfg.CLICK_MERGE_MS,
+            issue_type="click",
+            frame_size=1024,
+            hop_length=256,
+        )
+        assert isinstance(events, list)
+
+    def test_custom_rolling_median_seconds_accepted(self):
+        audio = _quiet_noise(3.0)
+        burst = _sine_burst(5000.0, 0.03, amp=0.5)
+        audio = _inject(audio, burst, 1.5)
+        events = detect_transients(
+            audio, SR, "t.wav",
+            band=cfg.CLICK_BAND,
+            threshold_mult=cfg.CLICK_THRESHOLD_MULTIPLIER,
+            max_duration_ms=500.0,
+            merge_ms=cfg.CLICK_MERGE_MS,
+            issue_type="click",
+            rolling_median_seconds=2.0,
+        )
+        assert isinstance(events, list)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DETECTORS — detect_noise_floor_jumps with custom params
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestDetectNoiseFloorCustomParams:
+    def _audio_with_jump(self, low_amp: float = 0.001, high_amp: float = 0.1) -> np.ndarray:
+        quiet = (RNG.standard_normal(SR * 2) * low_amp).astype(np.float32)
+        loud = (RNG.standard_normal(SR * 2) * high_amp).astype(np.float32)
+        return np.concatenate([quiet, loud])
+
+    def test_high_db_threshold_suppresses_detection(self):
+        audio = self._audio_with_jump(low_amp=0.001, high_amp=0.01)
+        events_default = detect_noise_floor_jumps(audio, SR, "t.wav")
+        events_high = detect_noise_floor_jumps(
+            audio, SR, "t.wav", noise_db_threshold=100.0
+        )
+        assert len(events_high) <= len(events_default)
+
+    def test_low_db_threshold_increases_detection(self):
+        audio = self._audio_with_jump(low_amp=0.001, high_amp=0.1)
+        events_default = detect_noise_floor_jumps(audio, SR, "t.wav")
+        events_low = detect_noise_floor_jumps(
+            audio, SR, "t.wav", noise_db_threshold=1.0
+        )
+        assert len(events_low) >= len(events_default)
+
+    def test_custom_min_separation_accepted(self):
+        audio = self._audio_with_jump()
+        events = detect_noise_floor_jumps(
+            audio, SR, "t.wav", noise_min_separation=0.5
+        )
+        assert isinstance(events, list)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DETECTORS — run_all_detectors with Config
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRunAllDetectorsWithConfig:
+    def test_none_cfg_uses_defaults(self):
+        audio = np.zeros(SR * 2, dtype=np.float32)
+        audio[500:510] = 1.0
+        events = run_all_detectors(audio, SR, "t.wav", cfg=None)
+        assert isinstance(events, list)
+
+    def test_default_config_same_as_none(self):
+        audio = np.zeros(SR * 2, dtype=np.float32)
+        audio[500:510] = 1.0
+        events_none = run_all_detectors(audio, SR, "t.wav", cfg=None)
+        events_default = run_all_detectors(audio, SR, "t.wav", cfg=Config())
+        assert len(events_none) == len(events_default)
+
+    def test_config_clipping_threshold_propagated(self):
+        audio = np.zeros(SR, dtype=np.float32)
+        audio[100:110] = 0.95
+        c = Config(clipping_threshold=0.9)
+        events = run_all_detectors(audio, SR, "t.wav", cfg=c)
+        assert any(e["issue_type"] == "clipping" for e in events)
+
+    def test_skip_overrides_config(self):
+        audio = np.zeros(SR * 2, dtype=np.float32)
+        audio[500:510] = 1.0
+        c = Config(clipping_threshold=0.5)
+        events = run_all_detectors(audio, SR, "t.wav", skip={"clipping"}, cfg=c)
+        assert not any(e["issue_type"] == "clipping" for e in events)
+
+    def test_config_frame_size_propagated(self):
+        audio = _quiet_noise(3.0)
+        c = Config(frame_size=1024, hop_length=256)
+        events = run_all_detectors(audio, SR, "t.wav", cfg=c)
+        assert isinstance(events, list)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RANKING — rank_events with Config
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRankEventsWithConfig:
+    def test_none_cfg_uses_defaults(self):
+        events = [_make_event(severity=float(i)) for i in range(10)]
+        ranked = rank_events(events, cfg=None)
+        assert isinstance(ranked, list)
+
+    def test_custom_max_primary(self):
+        n = 20
+        events = [_make_event(severity=float(i)) for i in range(n)]
+        c = Config(max_primary=5, max_secondary=10)
+        ranked = rank_events(events, cfg=c)
+        primaries = [e for e in ranked if e["tier"] == "primary"]
+        assert len(primaries) == 5
+
+    def test_custom_max_secondary(self):
+        n = 30
+        events = [_make_event(severity=float(i)) for i in range(n)]
+        c = Config(max_primary=5, max_secondary=7)
+        ranked = rank_events(events, cfg=c)
+        secondaries = [e for e in ranked if e["tier"] == "secondary"]
+        assert len(secondaries) == 7
+
+    def test_total_capped_at_custom_sum(self):
+        n = 50
+        events = [_make_event(severity=float(i)) for i in range(n)]
+        c = Config(max_primary=3, max_secondary=4)
+        ranked = rank_events(events, cfg=c)
+        assert len(ranked) == 7
+
+    def test_default_config_identical_to_no_cfg(self):
+        events = [_make_event(severity=float(i)) for i in range(30)]
+        # rank_events mutates the list; make fresh copies
+        events_a = [dict(e) for e in events]  # type: ignore[arg-type]
+        events_b = [dict(e) for e in events]  # type: ignore[arg-type]
+        ranked_none = rank_events(events_a)  # type: ignore[arg-type]
+        ranked_default = rank_events(events_b, cfg=Config())  # type: ignore[arg-type]
+        assert len(ranked_none) == len(ranked_default)
+
+    def test_max_primary_zero_gives_only_secondary(self):
+        events = [_make_event(severity=float(i)) for i in range(5)]
+        c = Config(max_primary=0, max_secondary=3)
+        ranked = rank_events(events, cfg=c)
+        for ev in ranked:
+            assert ev["tier"] == "secondary"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCANNER — scan_file with Config
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestScanFileWithConfig:
+    def test_cfg_none_works(self, tmp_path):
+        audio = np.zeros(SR * 2, dtype=np.float32)
+        audio[500:510] = 1.0
+        p = tmp_path / "t.wav"
+        sf.write(str(p), audio, SR, subtype="FLOAT")
+        events = scan_file(str(p), cfg=None)
+        assert isinstance(events, list)
+
+    def test_cfg_default_same_as_none(self, tmp_path):
+        audio = np.zeros(SR * 2, dtype=np.float32)
+        audio[500:510] = 1.0
+        p = tmp_path / "t.wav"
+        sf.write(str(p), audio, SR, subtype="FLOAT")
+        events_none = scan_file(str(p), cfg=None)
+        p2 = tmp_path / "t2.wav"
+        sf.write(str(p2), audio.copy(), SR, subtype="FLOAT")
+        events_cfg = scan_file(str(p2), cfg=Config())
+        assert len(events_none) == len(events_cfg)
+
+    def test_cfg_low_clipping_threshold_produces_more_events(self, tmp_path):
+        audio = np.zeros(SR * 2, dtype=np.float32)
+        audio[100:110] = 0.95
+        p_default = tmp_path / "def.wav"
+        p_low = tmp_path / "low.wav"
+        sf.write(str(p_default), audio, SR, subtype="FLOAT")
+        sf.write(str(p_low), audio.copy(), SR, subtype="FLOAT")
+        events_default = scan_file(str(p_default), cfg=Config())
+        c = Config(clipping_threshold=0.9)
+        events_low = scan_file(str(p_low), cfg=c)
+        assert len(events_low) >= len(events_default)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCANNER — scan_directory with Config
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestScanDirectoryWithConfig:
+    def test_cfg_none_accepted(self, tmp_path):
+        p = tmp_path / "x.wav"
+        sf.write(str(p), _quiet_noise(0.3), SR, subtype="FLOAT")
+        wavs, events = scan_directory(str(tmp_path), cfg=None)
+        assert isinstance(wavs, list)
+
+    def test_cfg_passed_to_scan_file(self, tmp_path):
+        audio = np.zeros(SR * 2, dtype=np.float32)
+        audio[100:110] = 0.95
+        p = tmp_path / "t.wav"
+        sf.write(str(p), audio, SR, subtype="FLOAT")
+        c = Config(clipping_threshold=0.9)
+        _, events = scan_directory(str(tmp_path), cfg=c)
+        assert any(e["issue_type"] == "clipping" for e in events)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLI — _build_parser
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestBuildParser:
+    def setup_method(self):
+        import importlib
+        import main as main_mod
+        importlib.reload(main_mod)
+        self.parser = main_mod._build_parser()
+
+    def test_prog_name(self):
+        assert self.parser.prog == "audiobook_qc"
+
+    def test_folder_positional(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.folder == "/tmp"
+
+    def test_skip_default_empty(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.skip == []
+
+    def test_skip_single_value(self):
+        args = self.parser.parse_args(["/tmp", "--skip", "click"])
+        assert "click" in args.skip
+
+    def test_skip_multiple_values(self):
+        args = self.parser.parse_args(["/tmp", "--skip", "click", "plosive"])
+        assert set(args.skip) == {"click", "plosive"}
+
+    def test_max_primary_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.max_primary == cfg.MAX_PRIMARY
+
+    def test_max_secondary_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.max_secondary == cfg.MAX_SECONDARY
+
+    def test_max_primary_override(self):
+        args = self.parser.parse_args(["/tmp", "--max-primary", "50"])
+        assert args.max_primary == 50
+
+    def test_max_secondary_override(self):
+        args = self.parser.parse_args(["/tmp", "--max-secondary", "300"])
+        assert args.max_secondary == 300
+
+    def test_clipping_threshold_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.clipping_threshold == pytest.approx(cfg.CLIPPING_THRESHOLD)
+
+    def test_clipping_threshold_override(self):
+        args = self.parser.parse_args(["/tmp", "--clipping-threshold", "0.99"])
+        assert args.clipping_threshold == pytest.approx(0.99)
+
+    def test_click_band_low_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.click_band_low == pytest.approx(float(cfg.CLICK_BAND[0]))
+
+    def test_click_band_high_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.click_band_high == pytest.approx(float(cfg.CLICK_BAND[1]))
+
+    def test_click_threshold_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.click_threshold == pytest.approx(cfg.CLICK_THRESHOLD_MULTIPLIER)
+
+    def test_click_max_duration_ms_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.click_max_duration_ms == pytest.approx(float(cfg.CLICK_MAX_DURATION_MS))
+
+    def test_click_merge_ms_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.click_merge_ms == pytest.approx(float(cfg.CLICK_MERGE_MS))
+
+    def test_plosive_band_low_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.plosive_band_low == pytest.approx(float(cfg.PLOSIVE_BAND[0]))
+
+    def test_plosive_band_high_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.plosive_band_high == pytest.approx(float(cfg.PLOSIVE_BAND[1]))
+
+    def test_plosive_threshold_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.plosive_threshold == pytest.approx(cfg.PLOSIVE_THRESHOLD_MULTIPLIER)
+
+    def test_plosive_max_duration_ms_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.plosive_max_duration_ms == pytest.approx(float(cfg.PLOSIVE_MAX_DURATION_MS))
+
+    def test_plosive_merge_ms_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.plosive_merge_ms == pytest.approx(float(cfg.PLOSIVE_MERGE_MS))
+
+    def test_noise_window_seconds_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.noise_window_seconds == pytest.approx(cfg.NOISE_WINDOW_SECONDS)
+
+    def test_noise_db_threshold_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.noise_db_threshold == pytest.approx(cfg.NOISE_DB_DELTA_THRESHOLD)
+
+    def test_noise_min_separation_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.noise_min_separation == pytest.approx(cfg.NOISE_MIN_SEPARATION_SECONDS)
+
+    def test_frame_size_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.frame_size == cfg.FRAME_SIZE
+
+    def test_hop_length_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.hop_length == cfg.HOP_LENGTH
+
+    def test_rolling_median_seconds_default(self):
+        args = self.parser.parse_args(["/tmp"])
+        assert args.rolling_median_seconds == pytest.approx(cfg.ROLLING_MEDIAN_SECONDS)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLI Flags — end-to-end config wiring through main()
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestCliFlags:
+    """Verify that CLI flags correctly wire through to Config and affect output."""
+
+    def _run(self, tmp_path, argv_extra: list[str], audio: np.ndarray | None = None):
+        import importlib
+        import main as main_mod
+        importlib.reload(main_mod)
+        wav_dir = tmp_path / "wavs"
+        wav_dir.mkdir(exist_ok=True)
+        if audio is None:
+            audio = np.zeros(SR * 2, dtype=np.float32)
+            audio[500:510] = 1.0
+        sf.write(str(wav_dir / "ch01.wav"), audio, SR, subtype="FLOAT")
+        with patch("sys.argv", ["main.py", str(wav_dir)] + argv_extra):
+            main_mod.main()
+        return wav_dir
+
+    def test_max_primary_flag_limits_primary_rows(self, tmp_path):
+        # Create many clipping events
+        audio = np.zeros(SR * 10, dtype=np.float32)
+        for i in range(20):
+            start = i * SR // 3
+            audio[start:start + 20] = 1.0
+        wav_dir = self._run(tmp_path, ["--max-primary", "3"], audio=audio)
+        df = pd.read_csv(str(wav_dir / "qc_report.csv"))
+        assert len(df[df["tier"] == "primary"]) <= 3
+
+    def test_max_secondary_flag_limits_secondary_rows(self, tmp_path):
+        audio = np.zeros(SR * 10, dtype=np.float32)
+        for i in range(20):
+            start = i * SR // 3
+            audio[start:start + 20] = 1.0
+        wav_dir = self._run(tmp_path, ["--max-primary", "3", "--max-secondary", "2"], audio=audio)
+        df = pd.read_csv(str(wav_dir / "qc_report.csv"))
+        assert len(df[df["tier"] == "secondary"]) <= 2
+
+    def test_skip_flag_omits_clipping(self, tmp_path):
+        audio = np.zeros(SR * 2, dtype=np.float32)
+        audio[500:510] = 1.0
+        wav_dir = self._run(tmp_path, ["--skip", "clipping"], audio=audio)
+        df = pd.read_csv(str(wav_dir / "qc_report.csv"))
+        assert "clipping" not in df["issue_type"].values
+
+    def test_skip_flag_omits_click(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--skip", "click"])
+        df = pd.read_csv(str(wav_dir / "qc_report.csv"))
+        assert "click" not in df["issue_type"].values
+
+    def test_skip_flag_omits_plosive(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--skip", "plosive"])
+        df = pd.read_csv(str(wav_dir / "qc_report.csv"))
+        assert "plosive" not in df["issue_type"].values
+
+    def test_skip_flag_omits_noise_floor_jump(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--skip", "noise_floor_jump"])
+        df = pd.read_csv(str(wav_dir / "qc_report.csv"))
+        assert "noise_floor_jump" not in df["issue_type"].values
+
+    def test_clipping_threshold_flag_low_detects_softer_clips(self, tmp_path):
+        audio = np.zeros(SR * 2, dtype=np.float32)
+        audio[100:110] = 0.95
+        import importlib
+        import main as main_mod
+        importlib.reload(main_mod)
+        wav_dir = tmp_path / "wavs"
+        wav_dir.mkdir()
+        sf.write(str(wav_dir / "ch01.wav"), audio, SR, subtype="FLOAT")
+        with patch("sys.argv", ["main.py", str(wav_dir), "--clipping-threshold", "0.9"]):
+            main_mod.main()
+        df = pd.read_csv(str(wav_dir / "qc_report.csv"))
+        assert any(df["issue_type"] == "clipping")
+
+    def test_noise_db_threshold_flag_very_high_suppresses(self, tmp_path):
+        quiet = (RNG.standard_normal(SR * 2) * 0.001).astype(np.float32)
+        loud = (RNG.standard_normal(SR * 2) * 0.1).astype(np.float32)
+        audio = np.concatenate([quiet, loud])
+        import importlib
+        import main as main_mod
+        importlib.reload(main_mod)
+        wav_dir = tmp_path / "wavs"
+        wav_dir.mkdir()
+        sf.write(str(wav_dir / "ch01.wav"), audio, SR, subtype="FLOAT")
+        with patch("sys.argv", ["main.py", str(wav_dir), "--noise-db-threshold", "999"]):
+            main_mod.main()
+        df = pd.read_csv(str(wav_dir / "qc_report.csv"))
+        assert "noise_floor_jump" not in df["issue_type"].values
+
+    def test_frame_size_flag_accepted(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--frame-size", "1024"])
+        # Should produce output without crashing
+        assert (wav_dir / "qc_report.csv").exists()
+
+    def test_hop_length_flag_accepted(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--hop-length", "256"])
+        assert (wav_dir / "qc_report.csv").exists()
+
+    def test_rolling_median_seconds_flag_accepted(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--rolling-median-seconds", "2.0"])
+        assert (wav_dir / "qc_report.csv").exists()
+
+    def test_click_threshold_flag_accepted(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--click-threshold", "8.0"])
+        assert (wav_dir / "qc_report.csv").exists()
+
+    def test_plosive_threshold_flag_accepted(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--plosive-threshold", "6.0"])
+        assert (wav_dir / "qc_report.csv").exists()
+
+    def test_click_merge_ms_flag_accepted(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--click-merge-ms", "200"])
+        assert (wav_dir / "qc_report.csv").exists()
+
+    def test_plosive_merge_ms_flag_accepted(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--plosive-merge-ms", "300"])
+        assert (wav_dir / "qc_report.csv").exists()
+
+    def test_click_max_duration_ms_flag_accepted(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--click-max-duration-ms", "30"])
+        assert (wav_dir / "qc_report.csv").exists()
+
+    def test_plosive_max_duration_ms_flag_accepted(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--plosive-max-duration-ms", "120"])
+        assert (wav_dir / "qc_report.csv").exists()
+
+    def test_noise_window_seconds_flag_accepted(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--noise-window-seconds", "2.0"])
+        assert (wav_dir / "qc_report.csv").exists()
+
+    def test_noise_min_separation_flag_accepted(self, tmp_path):
+        wav_dir = self._run(tmp_path, ["--noise-min-separation", "5.0"])
+        assert (wav_dir / "qc_report.csv").exists()
+
+    def test_all_flags_together_no_crash(self, tmp_path):
+        audio = np.zeros(SR * 3, dtype=np.float32)
+        audio[500:510] = 1.0
+        wav_dir = self._run(tmp_path, [
+            "--max-primary", "10",
+            "--max-secondary", "20",
+            "--clipping-threshold", "0.95",
+            "--click-band-low", "2000",
+            "--click-band-high", "9000",
+            "--click-threshold", "6.0",
+            "--click-max-duration-ms", "20",
+            "--click-merge-ms", "100",
+            "--plosive-band-low", "30",
+            "--plosive-band-high", "200",
+            "--plosive-threshold", "5.0",
+            "--plosive-max-duration-ms", "100",
+            "--plosive-merge-ms", "250",
+            "--noise-window-seconds", "2.0",
+            "--noise-db-threshold", "10.0",
+            "--noise-min-separation", "5.0",
+            "--frame-size", "1024",
+            "--hop-length", "256",
+            "--rolling-median-seconds", "0.5",
+        ], audio=audio)
+        assert (wav_dir / "qc_report.csv").exists()
+        assert (wav_dir / "review.html").exists()

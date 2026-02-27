@@ -6,11 +6,14 @@ Global severity ranking, tier assignment, and capping.
 
 from __future__ import annotations
 
-from audiobook_qc.config import MAX_PRIMARY, MAX_SECONDARY
+from audiobook_qc.config import Config
 from audiobook_qc.detectors import Event
 
 
-def rank_events(all_events: list[Event]) -> list[Event]:
+def rank_events(
+    all_events: list[Event],
+    cfg: Config | None = None,
+) -> list[Event]:
     """
     Sort events by severity (descending), assign rank_global and tier,
     then return only the top MAX_PRIMARY + MAX_SECONDARY events.
@@ -21,6 +24,9 @@ def rank_events(all_events: list[Event]) -> list[Event]:
 
     Raises RuntimeError on missing or non-numeric severity fields.
     """
+    c = cfg or Config()
+    max_primary = c.max_primary
+    max_secondary = c.max_secondary
     # ── 1. Validate and coerce severity before any sort ──────────────────────
     for ev in all_events:
         if "severity" not in ev:
@@ -45,15 +51,15 @@ def rank_events(all_events: list[Event]) -> list[Event]:
         ev["rank_global"] = idx + 1  # type: ignore[typeddict-unknown-key]
 
     # ── 4. Slice after rank assignment ───────────────────────────────────────
-    limit = MAX_PRIMARY + MAX_SECONDARY
+    limit = max_primary + max_secondary
     all_events = all_events[:limit]
 
     # ── 5. Assign tier using rank_global; drop anything that falls outside ───
     for ev in all_events:
         rank = ev["rank_global"]  # type: ignore[typeddict-item]
-        if rank <= MAX_PRIMARY:
+        if rank <= max_primary:
             ev["tier"] = "primary"  # type: ignore[typeddict-unknown-key]
-        elif rank <= MAX_PRIMARY + MAX_SECONDARY:
+        elif rank <= max_primary + max_secondary:
             ev["tier"] = "secondary"  # type: ignore[typeddict-unknown-key]
         else:
             ev["tier"] = None  # type: ignore[typeddict-unknown-key]

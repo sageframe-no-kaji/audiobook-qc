@@ -1,1 +1,6 @@
-__pycache__/\n*.pyc\n.coverage\nqc_report.csv
+__pycache__/
+*.pyc
+.coverage
+qc_report.csv
+test_files/
+docs/prompt.md
