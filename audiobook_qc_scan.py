@@ -368,14 +368,14 @@ def scan_file(filepath: str) -> list[Event]:
 
     audio = to_mono(audio_raw)
 
+    if len(audio) == 0:
+        return []
+
     # Clamp to [-1, 1]; soundfile decodes float PCM in-range, but some
     # non-standard files produced by DAWs may exceed unity.
     peak = np.max(np.abs(audio))
     if peak > 1.0:
         audio = audio / peak
-
-    if len(audio) == 0:
-        return []
 
     basename = os.path.basename(filepath)
 
