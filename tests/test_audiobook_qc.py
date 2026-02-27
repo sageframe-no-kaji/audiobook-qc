@@ -854,6 +854,17 @@ class TestRankEvents:
         ranked = rank_events(events)
         assert isinstance(ranked[0]["severity"], float)
 
+    def test_missing_severity_raises(self):
+        ev = {"filename": "t.wav", "timestamp": 1.0, "issue_type": "clipping"}
+        with pytest.raises(RuntimeError, match="Missing severity"):
+            rank_events([ev])  # type: ignore[arg-type]
+
+    def test_non_numeric_severity_raises(self):
+        ev = _make_event()
+        ev["severity"] = "bad"  # type: ignore[typeddict-item]
+        with pytest.raises(RuntimeError, match="Non-numeric severity"):
+            rank_events([ev])
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # REPORT_CSV — write_csv

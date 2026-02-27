@@ -18,10 +18,19 @@ def rank_events(all_events: list[Event]) -> list[Event]:
     Sort key is deterministic: (-severity, filename, timestamp, issue_type).
     Each returned dict gains two extra keys: ``rank_global`` (int) and
     ``tier`` (``"primary"`` | ``"secondary"``).
-    """
-    for ev in all_events:
-        ev["severity"] = float(ev["severity"])
 
+    Raises RuntimeError on missing or non-numeric severity fields.
+    """
+    # ── 1. Validate and coerce severity before any sort ──────────────────────
+    for ev in all_events:
+        if "severity" not in ev:
+            raise RuntimeError("Missing severity field.")
+        try:
+            ev["severity"] = float(ev["severity"])
+        except Exception:
+            raise RuntimeError("Non-numeric severity detected.")
+
+    # ── 2. Deterministic global sort ─────────────────────────────────────────
     all_events.sort(
         key=lambda e: (
             -e["severity"],
@@ -31,17 +40,26 @@ def rank_events(all_events: list[Event]) -> list[Event]:
         )
     )
 
+    # ── 3. Assign rank_global across the FULL sorted list ────────────────────
     for idx, ev in enumerate(all_events):
         ev["rank_global"] = idx + 1  # type: ignore[typeddict-unknown-key]
 
-    keep = MAX_PRIMARY + MAX_SECONDARY
-    ranked = all_events[:keep]
+    # ── 4. Slice after rank assignment ───────────────────────────────────────
+    limit = MAX_PRIMARY + MAX_SECONDARY
+    all_events = all_events[:limit]
 
-    for ev in ranked:
+    # ── 5. Assign tier using rank_global; drop anything that falls outside ───
+    for ev in all_events:
         rank = ev["rank_global"]  # type: ignore[typeddict-item]
         if rank <= MAX_PRIMARY:
             ev["tier"] = "primary"  # type: ignore[typeddict-unknown-key]
-        else:
+        elif rank <= MAX_PRIMARY + MAX_SECONDARY:
             ev["tier"] = "secondary"  # type: ignore[typeddict-unknown-key]
+        else:
+            ev["tier"] = None  # type: ignore[typeddict-unknown-key]
 
-    return ranked
+    all_events = [  # type: ignore[assignment]
+        ev for ev in all_events if ev.get("tier") is not None  # type: ignore[typeddict-item]
+    ]
+
+    return all_events
