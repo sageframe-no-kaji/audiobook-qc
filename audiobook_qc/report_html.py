@@ -195,6 +195,7 @@ _PAGE_TEMPLATE = """\
       var row = button.closest("tr");
       var audio = row.querySelector("audio");
       audio.currentTime = Math.max(0, audio.currentTime + delta);
+      audio.play();
     }
 
     function exportSelected() {
