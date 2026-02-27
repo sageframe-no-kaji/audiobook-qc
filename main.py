@@ -10,6 +10,7 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import sys
 
 from audiobook_qc.ranking import rank_events
@@ -17,23 +18,42 @@ from audiobook_qc.report_csv import write_csv
 from audiobook_qc.report_html import write_html
 from audiobook_qc.scanner import scan_directory
 
+ALL_DETECTORS = ["clipping", "click", "plosive", "noise_floor_jump"]
+
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("Usage: python main.py /path/to/wav_folder", file=sys.stderr)
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Audiobook QC scanner",
+    )
+    parser.add_argument("folder", help="Path to folder containing .wav files")
+    parser.add_argument(
+        "--skip",
+        nargs="+",
+        choices=ALL_DETECTORS,
+        default=[],
+        metavar="DETECTOR",
+        help=(
+            "Detector(s) to skip. "
+            f"Choices: {', '.join(ALL_DETECTORS)}"
+        ),
+    )
+    args = parser.parse_args()
 
     import os
 
-    folder = sys.argv[1]
+    folder: str = args.folder
+    skip: set[str] = set(args.skip)
 
     if not os.path.isdir(folder):
         print(f"Error: '{folder}' is not a valid directory.", file=sys.stderr)
         sys.exit(1)
 
+    if skip:
+        print(f"Skipping detectors: {', '.join(sorted(skip))}")
+
     print(f"Scanning WAV files in: {folder}\n")
 
-    wav_files, all_events = scan_directory(folder)
+    wav_files, all_events = scan_directory(folder, skip=skip)
     total_candidates = len(all_events)
 
     if not wav_files:

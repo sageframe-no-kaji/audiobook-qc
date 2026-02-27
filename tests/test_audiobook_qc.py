@@ -1038,12 +1038,12 @@ class TestMain:
         with patch("sys.argv", ["main.py", folder]):
             main_mod.main()
 
-    def test_no_args_exits_1(self):
+    def test_no_args_exits_2(self):
         import main as main_mod
         with patch("sys.argv", ["main.py"]):
             with pytest.raises(SystemExit) as exc:
                 main_mod.main()
-        assert exc.value.code == 1
+        assert exc.value.code == 2
 
     def test_bad_path_exits_1(self, tmp_path):
         import main as main_mod

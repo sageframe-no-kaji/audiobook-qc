@@ -17,9 +17,12 @@ import soundfile as sf
 from audiobook_qc.detectors import Event, run_all_detectors, to_mono
 
 
-def scan_file(filepath: str) -> list[Event]:
+def scan_file(
+    filepath: str,
+    skip: set[str] | None = None,
+) -> list[Event]:
     """
-    Load one WAV file, convert to mono, run all four detectors.
+    Load one WAV file, convert to mono, run detectors.
     Returns a flat list of event dicts.
     Skips the file gracefully on any read error.
     """
@@ -41,12 +44,20 @@ def scan_file(filepath: str) -> list[Event]:
         audio = audio / peak
 
     basename = os.path.basename(filepath)
-    return run_all_detectors(audio, sr, basename)
+    return run_all_detectors(audio, sr, basename, skip=skip)
 
 
-def scan_directory(folder: str) -> tuple[list[str], list[Event]]:
+def scan_directory(
+    folder: str,
+    skip: set[str] | None = None,
+) -> tuple[list[str], list[Event]]:
     """
     Recursively scan *folder* for WAV files, run all detectors on each.
+
+    Parameters
+    ----------
+    skip : set[str] | None
+        Detector names to exclude.
 
     Returns
     -------
@@ -62,6 +73,6 @@ def scan_directory(folder: str) -> tuple[list[str], list[Event]]:
     all_events: list[Event] = []
     for fp in wav_files:
         print(f"  Processing: {os.path.basename(fp)}")
-        all_events.extend(scan_file(fp))
+        all_events.extend(scan_file(fp, skip=skip))
 
     return wav_files, all_events

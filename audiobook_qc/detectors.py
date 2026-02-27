@@ -328,33 +328,49 @@ def detect_noise_floor_jumps(audio: np.ndarray, sr: int, filename: str) -> list[
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def run_all_detectors(audio: np.ndarray, sr: int, filename: str) -> list[Event]:
-    """Run every detector and return the combined flat event list."""
+def run_all_detectors(
+    audio: np.ndarray,
+    sr: int,
+    filename: str,
+    skip: set[str] | None = None,
+) -> list[Event]:
+    """Run every detector and return the combined flat event list.
+
+    Parameters
+    ----------
+    skip : set[str] | None
+        Detector names to exclude (e.g. {"noise_floor_jump"}).
+    """
+    _skip = skip or set()
     events: list[Event] = []
-    events.extend(detect_clipping(audio, sr, filename))
-    events.extend(
-        detect_transients(
-            audio,
-            sr,
-            filename,
-            band=CLICK_BAND,
-            threshold_mult=CLICK_THRESHOLD_MULTIPLIER,
-            max_duration_ms=CLICK_MAX_DURATION_MS,
-            merge_ms=CLICK_MERGE_MS,
-            issue_type="click",
+    if "clipping" not in _skip:
+        events.extend(detect_clipping(audio, sr, filename))
+    if "click" not in _skip:
+        events.extend(
+            detect_transients(
+                audio,
+                sr,
+                filename,
+                band=CLICK_BAND,
+                threshold_mult=CLICK_THRESHOLD_MULTIPLIER,
+                max_duration_ms=CLICK_MAX_DURATION_MS,
+                merge_ms=CLICK_MERGE_MS,
+                issue_type="click",
+            )
         )
-    )
-    events.extend(
-        detect_transients(
-            audio,
-            sr,
-            filename,
-            band=PLOSIVE_BAND,
-            threshold_mult=PLOSIVE_THRESHOLD_MULTIPLIER,
-            max_duration_ms=PLOSIVE_MAX_DURATION_MS,
-            merge_ms=PLOSIVE_MERGE_MS,
-            issue_type="plosive",
+    if "plosive" not in _skip:
+        events.extend(
+            detect_transients(
+                audio,
+                sr,
+                filename,
+                band=PLOSIVE_BAND,
+                threshold_mult=PLOSIVE_THRESHOLD_MULTIPLIER,
+                max_duration_ms=PLOSIVE_MAX_DURATION_MS,
+                merge_ms=PLOSIVE_MERGE_MS,
+                issue_type="plosive",
+            )
         )
-    )
-    events.extend(detect_noise_floor_jumps(audio, sr, filename))
+    if "noise_floor_jump" not in _skip:
+        events.extend(detect_noise_floor_jumps(audio, sr, filename))
     return events
