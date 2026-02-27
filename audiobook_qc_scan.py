@@ -64,12 +64,18 @@ ROLLING_MEDIAN_SECONDS = 1.0
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class Event(TypedDict, total=False):
+class Event(TypedDict):
     filename: str
     timestamp: float
-    end_time: float
     issue_type: str
     severity: float
+
+
+class _WorkEvent(Event, total=False):
+    """Internal merge-only type: inherits all required Event fields plus the
+    optional end_time tracking field used during gap-merging."""
+
+    end_time: float
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -97,7 +103,8 @@ def bandpass_filter(
     if low >= high:
         return audio.copy()
     sos = scipy.signal.butter(order, [low, high], btype="band", output="sos")
-    return scipy.signal.sosfilt(sos, audio).astype(np.float32)
+    filtered: np.ndarray = np.asarray(scipy.signal.sosfilt(sos, audio))
+    return filtered.astype(np.float32)
 
 
 def compute_frame_rms(
@@ -139,7 +146,9 @@ def find_runs(boolean_array: np.ndarray):
     return starts, ends
 
 
-def merge_events_by_gap(events: list[Event], merge_gap_s: float) -> list[Event]:
+def merge_events_by_gap(
+    events: list[_WorkEvent], merge_gap_s: float
+) -> list[_WorkEvent]:
     """
     Merge events of the same type that are separated by <= merge_gap_s seconds.
     The merged event inherits the earliest timestamp and the maximum severity.
@@ -148,7 +157,7 @@ def merge_events_by_gap(events: list[Event], merge_gap_s: float) -> list[Event]:
     if not events:
         return []
     events = sorted(events, key=lambda e: e["timestamp"])
-    merged: list[Event] = [cast(Event, {**events[0]})]
+    merged: list[_WorkEvent] = [cast(_WorkEvent, {**events[0]})]
     for ev in events[1:]:
         prev = merged[-1]
         gap = ev["timestamp"] - prev.get("end_time", prev["timestamp"])
@@ -159,7 +168,7 @@ def merge_events_by_gap(events: list[Event], merge_gap_s: float) -> list[Event]:
             )
             prev["severity"] = max(prev["severity"], ev["severity"])
         else:
-            merged.append(cast(Event, {**ev}))
+            merged.append(cast(_WorkEvent, {**ev}))
     return merged
 
 
@@ -182,11 +191,14 @@ def detect_clipping(audio: np.ndarray, sr: int, filename: str) -> list[Event]:
         count = int(e - s + 1)
         timestamp = float(s) / sr
         events.append(
-            Event(
-                filename=filename,
-                timestamp=timestamp,
-                issue_type="clipping",
-                severity=float(count),
+            cast(
+                Event,
+                {
+                    "filename": filename,
+                    "timestamp": timestamp,
+                    "issue_type": "clipping",
+                    "severity": float(count),
+                },
             )
         )
     return events
@@ -241,7 +253,7 @@ def detect_transients(
     max_frames = max_duration_ms / frame_dur_ms
 
     hop_over_sr = HOP_LENGTH / sr
-    candidates: list[Event] = []
+    candidates: list[_WorkEvent] = []
     for s, e in zip(starts, ends):
         span = int(e - s + 1)
         if span > max_frames:
@@ -250,12 +262,15 @@ def detect_transients(
         t_start = float(s) * hop_over_sr
         t_end = float(e) * hop_over_sr
         candidates.append(
-            Event(
-                filename=filename,
-                timestamp=t_start,
-                end_time=t_end,
-                issue_type=issue_type,
-                severity=peak_ratio,
+            cast(
+                _WorkEvent,
+                {
+                    "filename": filename,
+                    "timestamp": t_start,
+                    "end_time": t_end,
+                    "issue_type": issue_type,
+                    "severity": peak_ratio,
+                },
             )
         )
 
@@ -265,10 +280,22 @@ def detect_transients(
     merge_gap_s = merge_ms / 1000.0
     merged = merge_events_by_gap(candidates, merge_gap_s)
 
-    # Remove the internal 'end_time' tracking key
+    # Strip the internal end_time tracking key before returning
+    result: list[Event] = []
     for ev in merged:
         ev.pop("end_time", None)
-    return merged
+        result.append(
+            cast(
+                Event,
+                {
+                    "filename": ev["filename"],
+                    "timestamp": ev["timestamp"],
+                    "issue_type": ev["issue_type"],
+                    "severity": ev["severity"],
+                },
+            )
+        )
+    return result
 
 
 def detect_noise_floor_jumps(audio: np.ndarray, sr: int, filename: str) -> list[Event]:
@@ -302,11 +329,14 @@ def detect_noise_floor_jumps(audio: np.ndarray, sr: int, filename: str) -> list[
     candidates: list[Event] = []
     for idx in flagged_idx:
         candidates.append(
-            Event(
-                filename=filename,
-                timestamp=float(idx) * NOISE_WINDOW_SECONDS,
-                issue_type="noise_floor_jump",
-                severity=float(np.abs(delta[idx])),
+            cast(
+                Event,
+                {
+                    "filename": filename,
+                    "timestamp": float(idx) * NOISE_WINDOW_SECONDS,
+                    "issue_type": "noise_floor_jump",
+                    "severity": float(np.abs(delta[idx])),
+                },
             )
         )
 
