@@ -1,8 +1,8 @@
-# audiobook_qc
+# audiobook-qc
 
 **Automated quality-control scanner for audiobook WAV files.**
 
-audiobook_qc walks a folder of `.wav` files, runs four broadband signal-processing detectors, globally ranks every detected event by severity, and writes a machine-readable CSV plus a browser-based interactive review interface — all from a single command.
+audiobook-qc walks a folder of `.wav` files, runs four broadband signal-processing detectors, globally ranks every detected event by severity, and writes a machine-readable CSV plus a browser-based interactive review interface — all from a single command.
 
 ---
 
@@ -32,8 +32,8 @@ audiobook_qc walks a folder of `.wav` files, runs four broadband signal-processi
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-username/audio-sensor.git
-cd audio-sensor
+git clone https://github.com/your-username/audiobook-qc.git
+cd audiobook-qc
 
 # 2. Create and activate a virtual environment
 python3 -m venv .venv
@@ -268,7 +268,7 @@ write_html(ranked, "./chapters")
 ## Project Structure
 
 ```
-audio-sensor/
+audiobook-qc/
 ├── main.py                     # CLI entry point
 ├── audiobook_qc/
 │   ├── __init__.py             # Public API re-exports
