@@ -32,7 +32,7 @@ audiobook-qc walks a folder of `.wav` files, runs four broadband signal-processi
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-username/audiobook-qc.git
+git clone https://github.com/sageframe-no-kaji/audiobook-qc.git
 cd audiobook-qc
 
 # 2. Create and activate a virtual environment
