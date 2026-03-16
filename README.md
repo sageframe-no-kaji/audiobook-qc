@@ -4,6 +4,8 @@
 
 audiobook-qc walks a folder of `.wav` files, runs four broadband signal-processing detectors, globally ranks every detected event by severity, and writes a machine-readable CSV plus a browser-based interactive review interface — all from a single command.
 
+**Development Process:** This project was built using the [Ho System](https://atmarcus.net/work/ho-system), a structured methodology for human-AI collaborative development. The human makes every design decision. The AI implements under direction. There is verification at every step.
+
 ---
 
 ## Features
