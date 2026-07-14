@@ -12,6 +12,11 @@
       "license": "MIT",
       "created": "2026-02-27",
       "last_updated": "2026-07-09",
+      "short_description": "A signal-processing quality-control scanner that finds audio defects in WAV audiobooks and ranks them by severity for human review.",
+      "substantive_description": [
+        "Between recording an audiobook and assembling it lies the tedious question of which files have problems worth fixing. audiobook-qc answers it: it walks a folder of WAV files, applies four broadband detectors — clipping, clicks, plosives, and noise-floor jumps — scores each detected event by severity, pools every candidate across all files, and ranks them globally into a primary and a secondary tier. It writes two outputs to the scanned folder: a machine-readable qc_report.csv with per-event rank, tier, timestamp, issue type, and severity, and a self-contained review.html interface with per-file playback, sortable and filterable rows, per-event notes, and one-click export of selected events. It is a companion in the audiobook workflow, kindred to m4Bookmaker, that bridges capture and distribution by telling you exactly which files need remediation before final assembly.",
+        "Python 3.11+ with numpy, scipy, librosa, and soundfile for the DSP; 228 tests, flake8-clean; MIT-licensed. Feature-complete."
+      ],
       "state": {
         "stage": "dev",
         "last": "Project reached a feature-complete, lint-clean, tested state. Last meaningful commit: `31105e1` (\"Add development process attribution to README\") — a public, shipped tool with 228 passing pytest tests, flake8-clean, full CLI, interactive HTML review interface, and Python API. The commit before that (`1fab547`) established the MIT license and confirmed the repo under `sageframe-no-kaji`.",
@@ -19,11 +24,12 @@
         "as_of": "2026-07-09"
       },
       "_keisaku": {
-        "generated_at": "2026-07-12T10:36:25",
+        "generated_at": "2026-07-13T10:31:22",
         "generator_version": "1",
         "sources": {
           "readme": "README.md",
-          "contract": "ho-process/kamae-6-audiobook-qc-state-memory.md"
+          "contract": "ho-process/kamae-6-audiobook-qc-state-memory.md",
+          "description": "metadata/description.md"
         },
         "derived_defaults": {
           "id": "audiobook-qc",
@@ -32,7 +38,12 @@
             "software"
           ],
           "status": "in-development",
-          "created": "2026-02-27"
+          "created": "2026-02-27",
+          "short_description": "A signal-processing quality-control scanner that finds audio defects in WAV audiobooks and ranks them by severity for human review.",
+          "substantive_description": [
+            "Between recording an audiobook and assembling it lies the tedious question of which files have problems worth fixing. audiobook-qc answers it: it walks a folder of WAV files, applies four broadband detectors — clipping, clicks, plosives, and noise-floor jumps — scores each detected event by severity, pools every candidate across all files, and ranks them globally into a primary and a secondary tier. It writes two outputs to the scanned folder: a machine-readable qc_report.csv with per-event rank, tier, timestamp, issue type, and severity, and a self-contained review.html interface with per-file playback, sortable and filterable rows, per-event notes, and one-click export of selected events. It is a companion in the audiobook workflow, kindred to m4Bookmaker, that bridges capture and distribution by telling you exactly which files need remediation before final assembly.",
+            "Python 3.11+ with numpy, scipy, librosa, and soundfile for the DSP; 228 tests, flake8-clean; MIT-licensed. Feature-complete."
+          ]
         },
         "contract_issues": []
       }
